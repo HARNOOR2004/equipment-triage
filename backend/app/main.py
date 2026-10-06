@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.db import get_db, engine, Base
-from app import models  # noqa: F401  (tables register hone ke liye)
+from app import models  
 
 Base.metadata.create_all(bind=engine)
 
