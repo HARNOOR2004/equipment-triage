@@ -38,7 +38,7 @@ async function request(method, path, body) {
     });
   } catch {
     throw new ApiError(
-      "Cannot reach the server. It may be starting up (free hosting can take ~60s) — please retry.",
+      "Cannot reach the server. It may be starting up, please retry.",
       0
     );
   }
