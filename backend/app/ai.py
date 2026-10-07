@@ -1,10 +1,9 @@
 import json
 import logging
 import time
+import httpx
 from typing import Literal
 from pydantic import BaseModel, ValidationError
-from google import genai
-from google.genai import types
 
 from app.config import settings
 from app.rules import run_threshold_checks, overall_severity
@@ -13,6 +12,7 @@ from app.rag import retrieve, get_chunks, RetrievalError
 log = logging.getLogger("triage.ai")
 
 PRIORITIES = ["low", "medium", "high", "critical"]
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 # ---------- Output schema ----------
@@ -50,6 +50,10 @@ class AIError(Exception):
     pass
 
 
+class AITimeout(AIError):
+    pass
+
+
 SYSTEM_PROMPT = """You are a maintenance triage assistant supporting a human technician.
 Rules:
 - Possible causes are HYPOTHESES only. Never state a cause as confirmed or certain.
@@ -76,7 +80,7 @@ def _priority_floor(threshold_results: list[dict]) -> str:
 
 
 def _gather_chunks(equipment_type: str, query: str) -> list[dict]:
-    """Query-based hits + hamesha limits (x-1.1) aur priority guidance (x-3.2) sections."""
+    """Query-based hits + always the limits (x-1.1) and priority guidance (x-3.2) sections."""
     hits = retrieve(equipment_type, query, k=4)
     ids = {h["id"] for h in hits}
     for c in get_chunks():
@@ -114,61 +118,86 @@ RELEVANT MANUAL SECTIONS:
 """
 
 
-def _call_llm(prompt: str) -> AIOutput:
-    if not settings.gemini_api_key:
-        raise AIError("GEMINI_API_KEY is not configured")
+# ---------- LLM call (OpenRouter) ----------
+def _parse_output(text: str) -> AIOutput:
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.strip("`").strip()
+        if t.lower().startswith("json"):
+            t = t[4:].strip()
+    return AIOutput.model_validate_json(t)
 
-    client = genai.Client(
-        api_key=settings.gemini_api_key,
-        http_options=types.HttpOptions(timeout=45000),
+
+def _call_openrouter_once(prompt: str) -> AIOutput:
+    schema = json.dumps(AIOutput.model_json_schema())
+    system = (
+        SYSTEM_PROMPT
+        + "\n\nReturn ONLY a JSON object (no markdown, no commentary) that validates against this JSON schema:\n"
+        + schema
     )
+    payload = {
+        "model": settings.openrouter_model,
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        "response_format": {"type": "json_object"},
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.openrouter_api_key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        with httpx.Client(timeout=60) as c:
+            r = c.post(OPENROUTER_URL, headers=headers, json=payload)
+            if r.status_code == 400:  # some models reject response_format
+                payload.pop("response_format")
+                r = c.post(OPENROUTER_URL, headers=headers, json=payload)
+            r.raise_for_status()
+            data = r.json()
+
+        if data.get("error") or not data.get("choices"):
+            detail = str(data.get("error") or data)[:300]
+            raise AIError(f"Model returned no completion: {detail}")
+
+        text = data["choices"][0].get("message", {}).get("content")
+        if not text:
+            raise AIError("Model returned an empty message")
+        return _parse_output(text)
+
+    except AIError:
+        raise
+    except httpx.TimeoutException as e:
+        raise AITimeout(f"LLM request timed out: {type(e).__name__}")
+    except (ValidationError, json.JSONDecodeError) as e:
+        raise AIError(f"Model returned invalid structured output: {e}")
+    except Exception as e:
+        raise AIError(f"LLM request failed: {type(e).__name__}: {e}")
+
+
+def _call_llm(prompt: str) -> AIOutput:
+    if not (settings.openrouter_api_key and settings.openrouter_model):
+        raise AIError("LLM is not configured (set OPENROUTER_API_KEY and OPENROUTER_MODEL)")
 
     last_err = None
-
     for attempt in (1, 2):
         try:
-            resp = client.models.generate_content(
-                model=settings.gemini_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    response_mime_type="application/json",
-                    response_schema=AIOutput,
-                    temperature=0.2,
-                ),
-            )
-
-            if not resp.text:
-                raise AIError("Empty response from model")
-
-            return AIOutput.model_validate_json(resp.text)
-
-        except (ValidationError, json.JSONDecodeError) as e:
-            last_err = AIError(
-                f"Model returned invalid structured output: {e}"
-            )
-
+            log.info("llm_attempt attempt=%s model=%s", attempt, settings.openrouter_model)
+            return _call_openrouter_once(prompt)
+        except AITimeout as e:
+            last_err = e
+            log.warning("llm_attempt_failed attempt=%s error=%s (no retry on timeout)", attempt, e)
+            break
         except AIError as e:
             last_err = e
-
-        except Exception as e:
-            last_err = AIError(
-                f"LLM request failed: {type(e).__name__}: {e}"
-            )
-
-        log.warning(
-            "llm_attempt_failed attempt=%s error=%s",
-            attempt,
-            last_err,
-        )
-
-        # Give temporary Gemini 503/availability issues time to recover
-        if attempt == 1:
-            time.sleep(5)
-
+            log.warning("llm_attempt_failed attempt=%s error=%s", attempt, e)
+            if attempt == 1:
+                time.sleep(3)
     raise last_err
 
 
+# ---------- Validation ----------
 def _validate_and_reconcile(out: AIOutput, allowed_refs: set[str], floor: str) -> tuple[dict, list[str]]:
     issues: list[str] = []
 
@@ -197,7 +226,7 @@ def _validate_and_reconcile(out: AIOutput, allowed_refs: set[str], floor: str) -
 
     prio_refs = clean_refs(out.priority_evidence_refs, "priority")
 
-    # Priority AI ke bharose nahi: rules se neeche nahi ja sakti
+    # Priority can never go below the deterministic rule-based floor
     ai_prio = out.suggested_priority
     final = ai_prio
     if PRIORITIES.index(ai_prio) < PRIORITIES.index(floor):
@@ -226,8 +255,8 @@ def analyze_report(equipment_type: str, identifier: str, issue: str,
                    events: list[dict], readings: list[dict],
                    answers: dict | None = None) -> dict:
     """
-    Kabhi crash nahi karta. status: success | partial | failed
-    Deterministic results hamesha milte hain, AI/retrieval fail ho tab bhi.
+    Never raises. status: success | partial
+    Deterministic results are always returned, even when retrieval or the LLM fails.
     """
     threshold_results = run_threshold_checks(equipment_type, readings)
     severity = overall_severity(threshold_results)
@@ -246,7 +275,7 @@ def analyze_report(equipment_type: str, identifier: str, issue: str,
     try:
         chunks = _gather_chunks(equipment_type, query)
         result["retrieved_chunks"] = [
-            {"id": c["id"], "title": c["title"], "score": c["score"]} for c in chunks
+            {"id": c["id"], "title": c["title"], "score": c["score"], "text": c["text"]} for c in chunks
         ]
     except RetrievalError as e:
         log.error("retrieval_failed error=%s", e)
