@@ -161,17 +161,34 @@ export default function ReportDetail({ id, autorun }) {
   const observations = report.findings.filter((f) => f.kind === "observation");
   const confirmed = report.findings.filter((f) => f.kind === "confirmed");
 
-  return (
+   return (
     <div className="stack">
-      <div className="row between">
-        <h1>Report #{report.id}</h1>
-        <a href={`#/equipment/${encodeURIComponent(report.equipment.identifier)}`}>History for {report.equipment.identifier}</a>
+      <div className="page-head">
+        <div>
+          <div className="crumbs"><a href="#/history">History</a> / Report #{report.id}</div>
+          <h1>{report.equipment.identifier} <span className="h1-sub">{report.equipment.equipment_type.replace("_", " ")}</span></h1>
+        </div>
+        <a className="btn small" href={`#/equipment/${encodeURIComponent(report.equipment.identifier)}`}>Equipment history</a>
       </div>
-      <div className="card">
-        <div><strong>{report.equipment.identifier}</strong> <span className="muted">({report.equipment.equipment_type})</span> · <span className="muted small">{fmtDate(report.created_at)}</span></div>
-        <p>{report.issue_description}</p>
-        <div className="small"><strong>Operating events:</strong> {report.operating_events.length === 0 ? <span className="muted">none provided</span> : report.operating_events.map((e) => `${e.id}: ${e.text}`).join(" · ")}</div>
-        <div className="small"><strong>Submitted readings:</strong> {report.sensors.length === 0 ? <span className="muted">none provided</span> : report.sensors.map((s) => `${s.sensor_name}=${s.value ?? "—"}${s.unit ? " " + s.unit : ""}`).join(", ")}</div>
+
+      <div className="card facts">
+        <div className="fact">
+          <div className="fact-label">Report</div>
+          <div>#{report.id}</div>
+          <div className="muted small">{fmtDate(report.created_at)}</div>
+        </div>
+        <div className="fact wide">
+          <div className="fact-label">Issue</div>
+          <div>{report.issue_description}</div>
+        </div>
+        <div className="fact">
+          <div className="fact-label">Operating events</div>
+          {report.operating_events.length === 0 ? <div className="muted">none provided</div> : report.operating_events.map((e) => <div key={e.id} className="small">{e.id}: {e.text}</div>)}
+        </div>
+        <div className="fact">
+          <div className="fact-label">Submitted readings</div>
+          {report.sensors.length === 0 ? <div className="muted">none provided</div> : report.sensors.map((s) => <div key={s.id} className="small">{s.sensor_name} = {s.value ?? "—"}{s.unit ? " " + s.unit : ""}</div>)}
+        </div>
       </div>
 
       {running && <Spinner label="Running analysis (retrieval + AI)…" />}
@@ -183,48 +200,52 @@ export default function ReportDetail({ id, autorun }) {
         </Empty>
       )}
 
-      {analysis && (
-        <>
-          {analysis.status !== "success" && (
-            <Banner kind="warn" title={`Analysis ${analysis.status}`}>
-              {analysis.error} Deterministic threshold results are still shown below. <button className="btn small" onClick={run} disabled={running}>Retry analysis</button>
-            </Banner>
-          )}
-          {ai && ai.validation_issues && ai.validation_issues.length > 0 && (
-            <details className="card">
-              <summary>Validation notes ({ai.validation_issues.length}) — AI output was corrected by the system</summary>
-              <ul>{ai.validation_issues.map((v, i) => <li key={i}>{v}</li>)}</ul>
-            </details>
+      {analysis && analysis.status !== "success" && (
+        <Banner kind="warn" title={`Analysis ${analysis.status}`}>
+          {analysis.error} Deterministic threshold results are still shown below. <button className="btn small" onClick={run} disabled={running}>Retry analysis</button>
+        </Banner>
+      )}
+      {analysis && ai && ai.validation_issues && ai.validation_issues.length > 0 && (
+        <details className="card">
+          <summary>Validation notes ({ai.validation_issues.length}) — AI output was corrected by the system</summary>
+          <ul>{ai.validation_issues.map((v, i) => <li key={i}>{v}</li>)}</ul>
+        </details>
+      )}
+
+      <div className="detail-grid">
+        <div className="col-main">
+          {analysis && (
+            <section className="stack">
+              <h2>Observations <span className="muted small">recorded facts and rule-based checks</span></h2>
+              <div className="row"><span className="muted small">Overall severity</span> <Badge kind={analysis.severity}>{analysis.severity}</Badge></div>
+              <div className="table-card">
+                <table>
+                  <thead><tr><th>Sensor</th><th>Status</th><th>Value</th><th>Rule</th><th>Note</th></tr></thead>
+                  <tbody>
+                    {analysis.threshold_results.map((r) => (
+                      <tr key={r.sensor}>
+                        <td>{r.sensor}</td>
+                        <td><Badge kind={r.status}>{r.status}</Badge></td>
+                        <td>{r.value ?? "—"} {r.unit || ""}</td>
+                        <td className="small">{r.rule}</td>
+                        <td className="small">{r.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {ai && ai.data_quality_notes.length > 0 && (
+                <Banner kind="warn" title="Data quality">
+                  <ul>{ai.data_quality_notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+                </Banner>
+              )}
+            </section>
           )}
 
-          <section className="stack">
-            <h2>Observations <span className="muted small">(recorded facts and rule-based checks)</span></h2>
-            <div className="row"><span>Overall severity:</span> <Badge kind={analysis.severity}>{analysis.severity}</Badge></div>
-            <table>
-              <thead><tr><th>Sensor</th><th>Status</th><th>Value</th><th>Rule</th><th>Note</th></tr></thead>
-              <tbody>
-                {analysis.threshold_results.map((r) => (
-                  <tr key={r.sensor}>
-                    <td>{r.sensor}</td>
-                    <td><Badge kind={r.status}>{r.status}</Badge></td>
-                    <td>{r.value ?? "—"} {r.unit || ""}</td>
-                    <td className="small">{r.rule}</td>
-                    <td className="small">{r.message}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {ai && ai.data_quality_notes.length > 0 && (
-              <Banner kind="warn" title="Data quality">
-                <ul>{ai.data_quality_notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
-              </Banner>
-            )}
-          </section>
-
-          {ai && (
+          {analysis && ai && (
             <>
               <section className="stack">
-                <h2>Possible causes <span className="muted small">(hypotheses — not confirmed)</span></h2>
+                <h2>Possible causes <span className="muted small">hypotheses, not confirmed</span></h2>
                 {ai.possible_causes.length === 0 && <Empty>The AI returned no cited causes.</Empty>}
                 {ai.possible_causes.map((c, i) => (
                   <div className="card stack small-gap" key={i}>
@@ -257,79 +278,83 @@ export default function ReportDetail({ id, autorun }) {
               <section className="stack">
                 <h2>Suggested inspection steps</h2>
                 {ai.inspection_steps.length === 0 && <Empty>No cited inspection steps.</Empty>}
-                <ol>
-                  {ai.inspection_steps.map((s, i) => (
-                    <li key={i}>{s.instruction}<Citations refs={s.evidence_refs} info={info} /></li>
-                  ))}
-                </ol>
-              </section>
-
-              <section className="stack">
-                <h2>Maintenance priority</h2>
-                <div className="card stack small-gap">
-                  <div className="row">
-                    <Badge kind={`p-${ai.suggested_priority}`}>{ai.suggested_priority}</Badge>
-                    {ai.ai_original_priority !== ai.suggested_priority && (
-                      <span className="small">AI suggested <strong>{ai.ai_original_priority}</strong>; raised by deterministic threshold rules.</span>
-                    )}
-                  </div>
-                  <div>{ai.priority_reasoning}</div>
-                  <Citations refs={ai.priority_evidence_refs} info={info} />
+                <div className="card">
+                  <ol className="steps">
+                    {ai.inspection_steps.map((s, i) => (
+                      <li key={i}>{s.instruction}<Citations refs={s.evidence_refs} info={info} /></li>
+                    ))}
+                  </ol>
                 </div>
               </section>
             </>
           )}
-        </>
-      )}
+        </div>
 
-      {latestWO && (
-        <section className="stack">
-          <h2>Draft work order</h2>
-          <WorkOrderPanel key={`${latestWO.id}-${latestWO.status}`} wo={latestWO} onChange={reload} />
-          {olderWOs.length > 0 && (
+        <aside className="col-side">
+          {analysis && ai && (
+            <section className="stack">
+              <h2>Maintenance priority</h2>
+              <div className="card stack small-gap">
+                <div className="row wrap">
+                  <Badge kind={`p-${ai.suggested_priority}`}>{ai.suggested_priority}</Badge>
+                  {ai.ai_original_priority !== ai.suggested_priority && (
+                    <span className="small">AI suggested <strong>{ai.ai_original_priority}</strong>; raised by deterministic threshold rules.</span>
+                  )}
+                </div>
+                <div>{ai.priority_reasoning}</div>
+                <Citations refs={ai.priority_evidence_refs} info={info} />
+              </div>
+            </section>
+          )}
+
+          {latestWO && (
+            <section className="stack">
+              <h2>Draft work order</h2>
+              <WorkOrderPanel key={`${latestWO.id}-${latestWO.status}`} wo={latestWO} onChange={reload} />
+              {olderWOs.length > 0 && (
+                <details className="card">
+                  <summary>Earlier work orders ({olderWOs.length})</summary>
+                  {olderWOs.map((w) => (
+                    <div className="small" key={w.id}>#{w.id} <Badge kind={w.status}>{w.status}</Badge> <Badge kind={`p-${w.priority}`}>{w.priority}</Badge> {w.title}</div>
+                  ))}
+                </details>
+              )}
+            </section>
+          )}
+
+          <section className="stack">
+            <h2>Findings</h2>
+            <div className="card">
+              <h3>Observations</h3>
+              {observations.length === 0 ? <div className="muted small">None</div> : observations.map((f) => <div className="small" key={f.id}>• {f.text} <span className="muted">({f.source})</span></div>)}
+            </div>
+            <div className="card">
+              <h3>Confirmed by technician</h3>
+              {confirmed.length === 0 ? <div className="muted small">Nothing confirmed yet</div> : confirmed.map((f) => <div className="small" key={f.id}>• {f.text} <span className="muted">({f.source}, {fmtDate(f.created_at)})</span></div>)}
+            </div>
+            <div className="card stack small-gap">
+              <div className="row">
+                <select value={fKind} onChange={(e) => setFKind(e.target.value)}>
+                  <option value="observation">Observation</option>
+                  <option value="confirmed">Confirmed finding</option>
+                </select>
+                <input value={fText} onChange={(e) => setFText(e.target.value)} placeholder="Add a finding" />
+                <button className="btn" disabled={fText.trim().length < 3} onClick={addFinding}>Add</button>
+              </div>
+              {fErr && <span className="err">{fErr}</span>}
+            </div>
+          </section>
+
+          {analysis && analysis.retrieved_chunks.length > 0 && (
             <details className="card">
-              <summary>Earlier work orders ({olderWOs.length})</summary>
-              {olderWOs.map((w) => (
-                <div className="small" key={w.id}>#{w.id} <Badge kind={w.status}>{w.status}</Badge> <Badge kind={`p-${w.priority}`}>{w.priority}</Badge> {w.title}</div>
+              <summary>Manual sections retrieved ({analysis.retrieved_chunks.length})</summary>
+              {analysis.retrieved_chunks.map((c) => (
+                <div key={c.id} className="small chunk"><strong>{c.id} — {c.title}</strong><div className="muted">{c.text}</div></div>
               ))}
             </details>
           )}
-        </section>
-      )}
-
-      <section className="stack">
-        <h2>Findings</h2>
-        <div className="grid2">
-          <div className="card">
-            <h3>Observations</h3>
-            {observations.length === 0 ? <div className="muted small">None</div> : observations.map((f) => <div className="small" key={f.id}>• {f.text} <span className="muted">({f.source})</span></div>)}
-          </div>
-          <div className="card">
-            <h3>Confirmed by technician</h3>
-            {confirmed.length === 0 ? <div className="muted small">Nothing confirmed yet</div> : confirmed.map((f) => <div className="small" key={f.id}>• {f.text} <span className="muted">({f.source}, {fmtDate(f.created_at)})</span></div>)}
-          </div>
-        </div>
-        <div className="card stack small-gap">
-          <div className="row">
-            <select value={fKind} onChange={(e) => setFKind(e.target.value)}>
-              <option value="observation">Observation</option>
-              <option value="confirmed">Confirmed finding</option>
-            </select>
-            <input value={fText} onChange={(e) => setFText(e.target.value)} placeholder="Add a finding" />
-            <button className="btn" disabled={fText.trim().length < 3} onClick={addFinding}>Add</button>
-          </div>
-          {fErr && <span className="err">{fErr}</span>}
-        </div>
-      </section>
-
-      {analysis && analysis.retrieved_chunks.length > 0 && (
-        <details className="card">
-          <summary>Manual sections retrieved ({analysis.retrieved_chunks.length})</summary>
-          {analysis.retrieved_chunks.map((c) => (
-            <div key={c.id} className="small"><strong>{c.id} — {c.title}</strong><div className="muted">{c.text}</div></div>
-          ))}
-        </details>
-      )}
+        </aside>
+      </div>
     </div>
   );
 }

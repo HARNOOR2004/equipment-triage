@@ -28,27 +28,39 @@ export default function App() {
     page = <Equipment identifier={decodeURIComponent(parts[1])} />;
   else page = <NewReport />;
 
+  const section =
+    parts[0] === "history" || parts[0] === "equipment" || parts[0] === "reports" ? "history" : "new";
+
   return (
-    <div>
-      <header className="topbar">
-        <div className="brand">Equipment Triage Assistant</div>
-        <nav>
-          <a href="#/">New report</a>
-          <a href="#/history">History</a>
+    <div className="app">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="logo">ET</div>
+          <div>
+            <div className="brand-name">Equipment Triage</div>
+            <div className="brand-sub">Maintenance assistant</div>
+          </div>
+        </div>
+        <nav className="nav">
+          <a href="#/" className={section === "new" ? "active" : ""}>New report</a>
+          <a href="#/history" className={section === "history" ? "active" : ""}>History</a>
         </nav>
-        <label className="who">
-          Technician:
-          <input
-            value={name}
-            placeholder="Your name"
-            onChange={(e) => {
-              setName(e.target.value);
-              setTechnician(e.target.value);
-            }}
-          />
-        </label>
-      </header>
-      <main className="container">{page}</main>
+        <div className="sidebar-foot">
+          <label className="who">
+            Technician
+            <input
+              value={name}
+              placeholder="Your name"
+              onChange={(e) => {
+                setName(e.target.value);
+                setTechnician(e.target.value);
+              }}
+            />
+          </label>
+          <div className="hint">Used for approvals and the audit log</div>
+        </div>
+      </aside>
+      <main className="content">{page}</main>
     </div>
   );
 }

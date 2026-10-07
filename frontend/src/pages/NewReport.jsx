@@ -95,99 +95,114 @@ export default function NewReport() {
   if (types.loading && !types.data) return <Spinner label="Loading equipment types…" />;
   if (types.error) return <Banner title="Could not load equipment types" onRetry={types.reload}>{types.error.message}</Banner>;
 
-  return (
+   return (
     <form onSubmit={submit} className="stack">
-      <h1>Report an equipment problem</h1>
-      <div className="card">
-        <div className="muted small">Sample inputs (click to fill):</div>
-        <div className="row wrap">
-          {SAMPLES.map((s) => (
-            <button type="button" key={s.label} className="btn small" onClick={() => applySample(s)}>
-              {s.label}
-            </button>
-          ))}
+      <div className="page-head">
+        <div>
+          <h1>New report</h1>
+          <p className="sub">Describe the problem. Threshold rules, manual retrieval and AI triage run after you submit.</p>
         </div>
+      </div>
+
+      <div className="card samples">
+        <span className="muted small">Quick samples:</span>
+        {SAMPLES.map((s) => (
+          <button type="button" key={s.label} className="btn small pill" onClick={() => applySample(s)}>
+            {s.label}
+          </button>
+        ))}
       </div>
 
       {serverError && <Banner title="Could not submit report">{serverError}</Banner>}
 
-      <div className="grid2">
-        <label>
-          Equipment type
-          <select value={type} onChange={(e) => pickType(e.target.value)}>
-            {Object.keys(types.data).map((t) => (
-              <option key={t} value={t}>{t.replace("_", " ")}</option>
+      <div className="form-grid">
+        <div className="stack">
+          <div className="card stack">
+            <h2>Equipment and issue</h2>
+            <div className="grid2">
+              <label>
+                Equipment type
+                <select value={type} onChange={(e) => pickType(e.target.value)}>
+                  {Object.keys(types.data).map((t) => (
+                    <option key={t} value={t}>{t.replace("_", " ")}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Equipment identifier
+                <input value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="e.g. P-101" />
+                {errors.identifier && <span className="err">{errors.identifier}</span>}
+              </label>
+            </div>
+            <label>
+              Issue description
+              <textarea rows={6} value={issue} onChange={(e) => setIssue(e.target.value)} placeholder="What is wrong? What did you see, hear or smell?" />
+              {errors.issue && <span className="err">{errors.issue}</span>}
+            </label>
+          </div>
+
+                <div className="card stack small-gap">
+            <h2>Recent operating events</h2>
+            {events.map((ev, i) => (
+              <div className="row" key={i}>
+                <input
+                  value={ev}
+                  placeholder="e.g. Restarted after maintenance"
+                  onChange={(e) => setEvents(events.map((x, j) => (j === i ? e.target.value : x)))}
+                />
+                <button type="button" className="btn small" onClick={() => setEvents(events.filter((_, j) => j !== i))}>
+                  Remove
+                </button>
+              </div>
             ))}
-          </select>
-        </label>
-        <label>
-          Equipment identifier
-          <input value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="e.g. P-101" />
-          {errors.identifier && <span className="err">{errors.identifier}</span>}
-        </label>
-      </div>
+            <button type="button" className="btn small" onClick={() => setEvents([...events, ""])}>+ Add event</button>
+          </div>
+        </div>
 
-      <label>
-        Issue description
-        <textarea rows={3} value={issue} onChange={(e) => setIssue(e.target.value)} placeholder="What is wrong?" />
-        {errors.issue && <span className="err">{errors.issue}</span>}
-      </label>
+        <div className="stack">
+                   <div className="card stack small-gap">
+            <h2>Sensor readings</h2>
+            <div className="muted small">Optional. Leave blank if a reading is unavailable.</div>
+            {readings.map((r, i) => (
+              <div key={i}>
+                <div className="row">
+                  <select
+                    value={r.sensor_name}
+                    onChange={(e) => setReadings(readings.map((x, j) => (j === i ? { ...x, sensor_name: e.target.value } : x)))}
+                  >
+                    {sensors.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <input
+                    value={r.value}
+                    inputMode="decimal"
+                    placeholder="value"
+                    onChange={(e) => setReadings(readings.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+                  />
+                  <span className="unit">{(types.data[type] || {})[r.sensor_name]}</span>
+                  <button type="button" className="btn small" onClick={() => setReadings(readings.filter((_, j) => j !== i))}>
+                    Remove
+                  </button>
+                </div>
+                {errors[`r${i}`] && <span className="err">{errors[`r${i}`]}</span>}
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => setReadings([...readings, { sensor_name: sensors[0], value: "" }])}
+            >
+              + Add another reading
+            </button>
+            <div className="muted small">Two different readings for the same sensor are flagged as conflicting.</div>
+          </div>
 
-      <fieldset>
-        <legend>Recent operating events</legend>
-        {events.map((ev, i) => (
-          <div className="row" key={i}>
-            <input
-              value={ev}
-              placeholder="e.g. Restarted after maintenance"
-              onChange={(e) => setEvents(events.map((x, j) => (j === i ? e.target.value : x)))}
-            />
-            <button type="button" className="btn small" onClick={() => setEvents(events.filter((_, j) => j !== i))}>
-              Remove
+          <div className="form-actions">
+            <button className="btn primary lg" disabled={busy}>
+              {busy ? "Submitting…" : "Submit and analyze"}
             </button>
           </div>
-        ))}
-        <button type="button" className="btn small" onClick={() => setEvents([...events, ""])}>+ Add event</button>
-      </fieldset>
-
-      <fieldset>
-        <legend>Sensor readings (optional — leave blank if unavailable)</legend>
-        {readings.map((r, i) => (
-          <div key={i}>
-            <div className="row">
-              <select
-                value={r.sensor_name}
-                onChange={(e) => setReadings(readings.map((x, j) => (j === i ? { ...x, sensor_name: e.target.value } : x)))}
-              >
-                {sensors.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <input
-                value={r.value}
-                inputMode="decimal"
-                placeholder="value"
-                onChange={(e) => setReadings(readings.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
-              />
-              <span className="muted">{(types.data[type] || {})[r.sensor_name]}</span>
-              <button type="button" className="btn small" onClick={() => setReadings(readings.filter((_, j) => j !== i))}>
-                Remove
-              </button>
-            </div>
-            {errors[`r${i}`] && <span className="err">{errors[`r${i}`]}</span>}
-          </div>
-        ))}
-        <button
-          type="button"
-          className="btn small"
-          onClick={() => setReadings([...readings, { sensor_name: sensors[0], value: "" }])}
-        >
-          + Add another reading
-        </button>
-        <div className="muted small">Two different readings for the same sensor are flagged as conflicting.</div>
-      </fieldset>
-
-      <button className="btn primary" disabled={busy}>
-        {busy ? "Submitting…" : "Submit and analyze"}
-      </button>
+        </div>
+      </div>
     </form>
   );
 }
